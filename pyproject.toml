@@ -19,6 +19,7 @@ dependencies = [
       "pgvector>=0.2.5",
       "dotenv>=0.9.9",
       "pytest>=9.0.3",
+      "pylint>=4.0.5",
 ]
 
 [project.optional-dependencies]

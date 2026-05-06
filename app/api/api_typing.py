@@ -1,3 +1,4 @@
+"""API 统一响应模型"""
 from __future__ import annotations
 
 from typing import Generic, TypeVar
@@ -20,7 +21,8 @@ class ApiResponse(BaseModel, Generic[T]):
         data: 响应数据体
     """
     code: int = Field(description="The code of the response.", default=DEFAULT_SUCCESS_CODE)
-    message: str = Field(description="The message of the response.", default=DEFAULT_SUCCESS_MESSAGE)
+    message: str = Field(
+        description="The message of the response.", default=DEFAULT_SUCCESS_MESSAGE)
     timestamp: int = Field(
         description="The timestamp of the response.",
         default_factory=lambda: get_timestamp(milliseconds=True)
@@ -53,7 +55,8 @@ def create_api_response(
     )
 
 
-def create_error_api_response(code: int, message: str, timestamp: int | None = None) -> ApiResponse[None]:
+def create_error_api_response(
+    code: int, message: str, timestamp: int | None = None) -> ApiResponse[None]:
     """创建错误类型的 API 响应（data 固定为 None）
     
     Args:
@@ -67,7 +70,8 @@ def create_error_api_response(code: int, message: str, timestamp: int | None = N
     return create_api_response(code=code, message=message, data=None, timestamp=timestamp)
 
 
-def create_success_api_response(data: T | None = None, timestamp: int | None = None) -> ApiResponse[T]:
+def create_success_api_response(
+    data: T | None = None, timestamp: int | None = None) -> ApiResponse[T]:
     """创建成功类型的 API 响应（使用默认成功码和消息）
     
     Args:

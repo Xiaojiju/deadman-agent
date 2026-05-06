@@ -1,5 +1,6 @@
+"""日志配置模块"""
+
 import logging
-import os
 
 from app.core.config import get_settings
 
@@ -8,7 +9,7 @@ __all__ = ["configure_logging"]
 
 def configure_logging() -> None:
     """配置应用的日志记录
-    
+
     Returns:
         None
     """

@@ -1,3 +1,5 @@
+"""文件加载：统一结果模型、抽象加载器与 TXT / XLSX 等具体实现。"""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -68,7 +70,6 @@ class FileLoader(ABC):
         Returns:
             文件加载结果，具体实现类需要实现
         """
-        ...
 
     @classmethod
     @abstractmethod
@@ -78,7 +79,6 @@ class FileLoader(ABC):
         Returns:
             支持的文件后缀
         """
-        ...
 
 
 class TxtFileLoader(FileLoader):
@@ -165,14 +165,12 @@ class XlsxFileLoader(FileLoader):
         excel_file = pd.ExcelFile(path)
         for sheet_name in excel_file.sheet_names:
             sheet_df =pd.read_excel(excel_file, sheet_name=sheet_name, header=None)
-            
             lines = []
             for _, row in sheet_df.iterrows():
                 cells = [str(cell).strip() if pd.notna(cell) else "" for cell in row]
                 line = " | ".join(cells)
                 if line.strip():
                     lines.append(line)
-            
             sheet_header = f"sheet table: {sheet_name}\n"
             full_text_parts.append(sheet_header)
             full_text_parts.extend(lines)

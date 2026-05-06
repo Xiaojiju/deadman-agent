@@ -1,3 +1,5 @@
+"""时间戳格式化"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

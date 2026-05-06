@@ -1,7 +1,9 @@
+"""文件加载器注册表"""
+
 from pathlib import Path
 from typing import Iterable
 
-from app.utils.file.file_errors import UnsupportedFormatError
+from app.utils.file.file_errors import MissingFileError, UnsupportedFormatError
 from app.utils.file.file_loader import FileLoadResult, FileLoader, TxtFileLoader, XlsxFileLoader
 
 
@@ -52,7 +54,7 @@ class FileLoaderRegistry:
         """
         path = Path(path)
         if not path.is_file():
-            raise FileNotFoundError(f"File {path} not found")
+            raise MissingFileError(f"File {path} not found")
         suf_lower = path.suffix.lower()
         loader = self._by_suffix.get(suf_lower)
         if loader is None:

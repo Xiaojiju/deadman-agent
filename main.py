@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 
 from app.api.routes import router as api_router
-from app.core.logging import configure_logging
+from app.core.log_config import configure_logging
 
 
 def create_app() -> FastAPI:
@@ -13,9 +13,10 @@ def create_app() -> FastAPI:
         FastAPI应用
     """
     configure_logging()
-    app = FastAPI(title="Deadman Agent", version="0.1.0", docs_url=None, redoc_url=None)
-    app.include_router(api_router)
-    return app
+    application = FastAPI(
+        title="Deadman Agent", version="0.1.0", docs_url=None, redoc_url=None)
+    application.include_router(api_router)
+    return application
 
 
 app = create_app()

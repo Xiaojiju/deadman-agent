@@ -1,3 +1,5 @@
+"""应用配置模块"""
+
 from dataclasses import dataclass
 import os
 from typing import TypeVar
