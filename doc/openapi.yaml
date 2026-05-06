@@ -1,0 +1,82 @@
+openapi: '3.1.0'
+info:
+  title: 'Deadman Agent'
+  version: '0.1.0'
+paths:
+  /health:
+    get:
+      summary: 'Health'
+      description:
+        |-
+          Check the health of the application.
+          
+          Returns:
+              A dictionary with the status of the application.
+      operationId: 'health_health_get'
+      responses:
+        '200':
+          description: 'Successful Response'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse_HealthData_'
+components:
+  schemas:
+    ApiResponse_HealthData_:
+      properties:
+        status:
+          type: 'string'
+          enum:
+            - 'ok'
+            - 'error'
+          title: 'Status'
+          description: 'The status of the response.'
+        code:
+          type: 'integer'
+          title: 'Code'
+          description: 'The code of the response.'
+          default: 0
+        message:
+          type: 'string'
+          title: 'Message'
+          description: 'The message of the response.'
+          default: 'Success'
+        timestamp:
+          type: 'integer'
+          title: 'Timestamp'
+          description: 'The timestamp of the response.'
+        data:
+          anyOf:
+            -
+              $ref: '#/components/schemas/HealthData'
+            -
+              type: 'null'
+          description: 'The data of the response.'
+      type: 'object'
+      required:
+        - 'status'
+        - 'timestamp'
+      title: 'ApiResponse[HealthData]'
+    HealthData:
+      properties:
+        status:
+          type: 'string'
+          const: 'ok'
+          title: 'Status'
+          description: 'The status of the application.'
+        version:
+          type: 'string'
+          title: 'Version'
+          description: 'The version of the application.'
+      type: 'object'
+      required:
+        - 'status'
+        - 'version'
+      title: 'HealthData'
+      description:
+        |-
+          Health data.
+          
+          Attributes:
+              status: The status of the application.
+              version: The version of the application.
