@@ -4,8 +4,6 @@ import logging
 
 from app.core.config import get_settings
 
-__all__ = ["configure_logging"]
-
 
 def configure_logging() -> None:
     """配置应用的日志记录
@@ -19,3 +17,5 @@ def configure_logging() -> None:
         level=level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+
+logger: logging.Logger = logging.getLogger(__name__)
