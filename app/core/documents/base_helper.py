@@ -1,5 +1,6 @@
 """文档转换辅助函数"""
 
+import uuid
 from langchain_core.documents.base import Document
 
 from app.core.documents.base import DocumentChunk
@@ -16,4 +17,10 @@ def transform_document(chunks: list[Document]) -> list[DocumentChunk]:
     """
     if not chunks:
         return []
-    return [DocumentChunk(id=chunk.id, text=chunk.page_content) for chunk in chunks]
+    return [
+        DocumentChunk(
+            id=str(uuid.uuid4()),
+            text=chunk.page_content,
+            metadata=chunk.metadata or {}
+        ) for chunk in chunks
+    ]

@@ -3,7 +3,7 @@
 from typing import Any
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from app.core.documents.base import BaseDocumentSplitter, DocumentResult
+from app.core.documents.base import BaseDocumentSplitter, DocumentChunk
 from app.core.documents.base_helper import transform_document
 
 
@@ -37,18 +37,19 @@ class TextDocumentSplitter(BaseDocumentSplitter):
             separators=self._separators,
             is_separator_regex=self._is_separator_regex,
             chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap
+            chunk_overlap=self.chunk_overlap,
+            strip_whitespace=self.strip_whitespace
         )
 
-    def split_document(self, text: str) -> DocumentResult:
+    def split_text(self, text: str) -> list[DocumentChunk]:
         """分割文档
         
         Args:
             text: 文本
         
         Returns:
-            DocumentResult: 文档结果
+            list[DocumentChunk]: 文档块列表
         """
         splitter = self._delagate_splitter()
-        documents = splitter.split_documents(text)
-        return transform_document(documents)
+        chunks = splitter.create_documents([text], metadatas=[{}])
+        return transform_document(chunks)
