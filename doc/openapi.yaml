@@ -25,7 +25,9 @@ paths:
       summary: 'Chat'
       description:
         |-
-          发送用户消息并返回模型回复；使用 ``session_id`` 区分会话以承载多轮上下文。
+          发送用户消息并返回**整段**模型回复（JSON）；使用 ``session_id`` 区分会话以承载多轮上下文。
+
+          若需要**打字机式流式输出**，请使用 ``GET /chat/stream`` 或 ``POST /chat/stream``（SSE）；本接口使用非流式模型实例，与流式接口的底层 runnable 分离。
       operationId: 'chat_chat_post'
       tags:
         - 'chat'
@@ -51,6 +53,113 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponse_ChatData_'
+  /chat/stream:
+    get:
+      summary: 'Chat stream (SSE)'
+      description:
+        |-
+          使用 **Server-Sent Events**（``Content-Type: text/event-stream``）流式返回模型增量，适合浏览器 ``EventSource``（仅支持 GET）实现打字机效果。
+
+          与 ``POST /chat`` 共用同一套 ``session_id`` / ``user_input`` query 参数；流式链路使用独立 ``stream_runnable``（底层模型 ``streaming=true``），非流式 ``POST /chat`` 使用同步模型实例。
+
+          **帧格式**：每个事件为 ``data: <单行 JSON>``，后跟空行 ``\\n\\n``。正文增量为 ``{"type":"token","delta":"..."}``；正常结束为 ``{"type":"done"}``；随后发送字面量 ``data: [DONE]`` 一行（兼容常见客户端）。异常时为 ``{"type":"error","message":"..."}``，仍会发送 ``done`` 与 ``[DONE]``。
+      operationId: 'chat_stream_get'
+      tags:
+        - 'chat'
+      parameters:
+        -
+          name: 'session_id'
+          in: 'query'
+          required: true
+          description: '会话 ID，与 ``POST /chat`` 相同，用于多轮上下文与历史持久化。'
+          schema:
+            type: 'string'
+        -
+          name: 'user_input'
+          in: 'query'
+          required: true
+          description: '用户输入的纯文本内容。'
+          schema:
+            type: 'string'
+      responses:
+        '200':
+          description: 'SSE 字节流（``text/event-stream``），事件体见 ``#/components/schemas`` 中以 ``ChatStream`` 前缀命名的各事件 schema。'
+          headers:
+            Cache-Control:
+              schema:
+                type: 'string'
+              description: '``no-cache``'
+            Connection:
+              schema:
+                type: 'string'
+              description: '``keep-alive``'
+            X-Accel-Buffering:
+              schema:
+                type: 'string'
+              description: '``no``（减轻 Nginx 等对响应的缓冲）'
+          content:
+            text/event-stream:
+              schema:
+                type: 'string'
+                description: |
+                  SSE 文本流。每行 ``data:`` 后为 JSON 对象，类型见 ``ChatStreamTokenEvent`` / ``ChatStreamDoneEvent`` / ``ChatStreamErrorEvent``；流结束前追加 ``data: [DONE]``。
+              example: |
+                data: {"type":"token","delta":"你"}
+
+                data: {"type":"token","delta":"好"}
+
+                data: {"type":"done"}
+
+                data: [DONE]
+
+    post:
+      summary: 'Chat stream (SSE) POST'
+      description:
+        |-
+          与 ``GET /chat/stream`` **语义相同**，以 POST 调用，便于在受限环境中用 ``fetch`` 拉取流（参数仍为 query，与 ``POST /chat`` 一致）。
+
+          注意：``EventSource`` 仅支持 GET；若需 POST 拉流，请使用 ``fetch`` + ``ReadableStream`` 解析 ``text/event-stream``。
+      operationId: 'chat_stream_post'
+      tags:
+        - 'chat'
+      parameters:
+        -
+          name: 'session_id'
+          in: 'query'
+          required: true
+          description: '会话 ID，与 ``POST /chat`` 相同。'
+          schema:
+            type: 'string'
+        -
+          name: 'user_input'
+          in: 'query'
+          required: true
+          description: '用户输入的纯文本内容。'
+          schema:
+            type: 'string'
+      responses:
+        '200':
+          description: '同 ``GET /chat/stream`` 的 SSE 响应。'
+          headers:
+            Cache-Control:
+              schema:
+                type: 'string'
+            Connection:
+              schema:
+                type: 'string'
+            X-Accel-Buffering:
+              schema:
+                type: 'string'
+          content:
+            text/event-stream:
+              schema:
+                type: 'string'
+              example: |
+                data: {"type":"token","delta":"…"}
+
+                data: {"type":"done"}
+
+                data: [DONE]
 components:
   schemas:
     ApiResponse_HealthData_:
@@ -163,3 +272,38 @@ components:
             - 'string'
             - 'null'
           description: '结束原因（若有）。'
+    ChatStreamTokenEvent:
+      type: 'object'
+      description: 'SSE 中单条 ``data:`` 行解析后的 JSON（正文增量）。'
+      required:
+        - 'type'
+        - 'delta'
+      properties:
+        type:
+          type: 'string'
+          const: 'token'
+        delta:
+          type: 'string'
+          description: '本帧追加的 UTF-8 文本片段，客户端顺序拼接即为完整回复。'
+    ChatStreamDoneEvent:
+      type: 'object'
+      description: 'SSE 流正常结束信号（在 ``data: [DONE]`` 之前发送）。'
+      required:
+        - 'type'
+      properties:
+        type:
+          type: 'string'
+          const: 'done'
+    ChatStreamErrorEvent:
+      type: 'object'
+      description: '流式过程中发生错误时的事件（随后仍会发送 ``ChatStreamDoneEvent`` 与 ``[DONE]``）。'
+      required:
+        - 'type'
+        - 'message'
+      properties:
+        type:
+          type: 'string'
+          const: 'error'
+        message:
+          type: 'string'
+          description: '错误描述（面向调试或前端提示）。'

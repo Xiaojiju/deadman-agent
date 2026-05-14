@@ -8,6 +8,7 @@
 import json
 import os
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any, Callable, Sequence
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
@@ -23,6 +24,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import Runnable, RunnableWithMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
 from app.core.agent.default_model import BasicAdapterModel
+from app.core.agent.prompt_loader import DEFAULT_SYSTEM_PROMPT
 from app.core.agent.summarization import ConversationSummarization
 from app.core.config import get_settings
 from app.core.log_config import logger as log
@@ -391,12 +393,42 @@ class RunnableWithHistory:
         )
         return response
 
+    def invoke_stream(
+        self,
+        session_id: str,
+        user_input: str,
+    ) -> Iterator[Any]:
+        """流式执行模型（供 SSE 等场景迭代 chunk）。
+
+        Args:
+            session_id: 会话ID
+            user_input: 用户输入文本
+        Yields:
+            LangChain 链路产生的流式 chunk（多为 ``AIMessageChunk``）。
+        """
+        user_message = HumanMessage(content=user_input)
+        yield from self.runnable.stream(
+            {self.input_message_key: user_message},
+            config={"configurable": {"session_id": session_id}},
+        )
+
 settings = get_settings()
 
+# 流式执行模型
+stream_runnable = RunnableWithHistory(
+    model=BasicAdapterModel.from_settings(settings, stream=True),
+    conversation_summarizer=ConversationSummarization(),
+    system_prompt=DEFAULT_SYSTEM_PROMPT,
+    input_message_key="input",
+    output_message_key="output",
+    history_key="history",
+)
+
+# 非流式执行模型
 runnable = RunnableWithHistory(
     model=BasicAdapterModel.from_settings(settings),
     conversation_summarizer=ConversationSummarization(),
-    system_prompt="You are a helpful assistant.",
+    system_prompt=DEFAULT_SYSTEM_PROMPT,
     input_message_key="input",
     output_message_key="output",
     history_key="history",

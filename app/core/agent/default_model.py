@@ -73,11 +73,12 @@ class BasicAdapterModel(ChatOpenAI):
         )
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> Self:
+    def from_settings(cls, settings: Settings, *, stream: bool = False) -> Self:
         """从设置中构建模型
 
         Args:
             settings: 设置
+            stream: 是否启用底层流式输出（``/chat/stream`` 等场景建议为 True）
         Returns:
             Self: 模型
         """
@@ -85,6 +86,7 @@ class BasicAdapterModel(ChatOpenAI):
             model=settings.base_model,
             api_key=settings.api_key,
             base_url=settings.base_url,
+            stream=stream,
         )
 
     @classmethod
