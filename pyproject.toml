@@ -20,6 +20,7 @@ dependencies = [
       "dotenv>=0.9.9",
       "pytest>=9.0.3",
       "pylint>=4.0.5",
+      "langchain-openai>=1.2.1",
 ]
 
 [project.optional-dependencies]

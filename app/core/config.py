@@ -43,7 +43,7 @@ def _get_env(name: str, cast: type[T], default: T | None = None) -> T:
         if normalized in {"1", "true", "t", "yes", "y", "on"}:
             return True
         if normalized in {"0", "false", "f", "no", "n", "off"}:
-            return False 
+            return False
         raise ValueError(f"Invalid boolean for env var {name}: {raw!r}")
 
     try:
@@ -62,16 +62,14 @@ class Settings:
         base_model: 基础模型
         api_key: API密钥
         log_level: 日志级别
-        port: 端口
         api_prefix: API前缀
     """
     embedding_db_url: str
     base_url: str
     base_model: str
+    llm_type: str
     api_key: str
     log_level: str
-    # Server
-    port: int
     api_prefix: str
 
 
@@ -82,11 +80,18 @@ def get_settings() -> Settings:
         应用配置
     """
     return Settings(
+        # Embedding Database
         embedding_db_url=_get_env("EMBEDDING_DB_URL", str),
-        base_url=_get_env("BASE_URL", str),
-        base_model=_get_env("BASE_MODEL", str),
-        api_key=_get_env("API_KEY", str),
+
+        # Model
+        base_url=_get_env("BASIC_MODEL_BASE_URL", str),
+        base_model=_get_env("BASIC_MODEL", str),
+        llm_type=_get_env("LLM_TYPE", str),
+        api_key=_get_env("BASIC_MODEL_API_KEY", str),
+
+        # Log
         log_level=_get_env("LOG_LEVEL", str),
-        port=_get_env("PORT", int),
+
+        # Server
         api_prefix=_get_env("API_PREFIX", str),
     )

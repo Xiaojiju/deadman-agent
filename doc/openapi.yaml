@@ -20,6 +20,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponse_HealthData_'
+  /chat:
+    post:
+      summary: 'Chat'
+      description:
+        |-
+          发送用户消息并返回模型回复；使用 ``session_id`` 区分会话以承载多轮上下文。
+      operationId: 'chat_chat_post'
+      tags:
+        - 'chat'
+      parameters:
+        -
+          name: 'session_id'
+          in: 'query'
+          required: true
+          description: '会话 ID，用于关联历史与摘要等上下文。'
+          schema:
+            type: 'string'
+        -
+          name: 'user_input'
+          in: 'query'
+          required: true
+          description: '用户输入的纯文本内容。'
+          schema:
+            type: 'string'
+      responses:
+        '200':
+          description: 'Successful Response'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse_ChatData_'
 components:
   schemas:
     ApiResponse_HealthData_:
@@ -80,3 +111,55 @@ components:
           Attributes:
               status: The status of the application.
               version: The version of the application.
+    ApiResponse_ChatData_:
+      properties:
+        code:
+          type: 'integer'
+          title: 'Code'
+          description: '业务响应码（0 表示成功）。'
+          default: 0
+        message:
+          type: 'string'
+          title: 'Message'
+          description: '响应描述信息。'
+          default: 'Success'
+        timestamp:
+          type: 'integer'
+          title: 'Timestamp'
+          description: '响应时间戳（毫秒）。'
+        data:
+          anyOf:
+            -
+              $ref: '#/components/schemas/ChatReplyData'
+            -
+              type: 'null'
+          description: '聊天成功时返回的助手回复摘要。'
+      type: 'object'
+      required:
+        - 'code'
+        - 'message'
+        - 'timestamp'
+      title: 'ApiResponse[ChatReplyData]'
+    ChatReplyData:
+      type: 'object'
+      description: '单轮助手回复（精简字段，便于前端展示）。'
+      required:
+        - 'content'
+      properties:
+        role:
+          type: 'string'
+          description: '消息角色，默认 assistant。'
+          default: 'assistant'
+        content:
+          type: 'string'
+          description: '助手回复正文。'
+        model:
+          type:
+            - 'string'
+            - 'null'
+          description: '模型名称（若有）。'
+        finish_reason:
+          type:
+            - 'string'
+            - 'null'
+          description: '结束原因（若有）。'
