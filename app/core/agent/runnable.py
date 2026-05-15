@@ -382,7 +382,7 @@ class RunnableWithHistory:
         
         Args:
             session_id: 会话ID
-            user_input: 用户输入文本
+            user_input: 用户输入文本 
         Returns:
             dict[str, Any]: 输出
         """
