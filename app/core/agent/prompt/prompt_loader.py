@@ -48,6 +48,16 @@ def load_default_system_prompt() -> str:
         return _FALLBACK_SYSTEM_PROMPT
     return content
 
+def load_policy_from_disk(policy_path: Path) -> str:
+    """从磁盘加载提示词策略
+    
+    Args:
+        policy_path: 提示词策略文件路径
+    Returns:
+        str: 提示词策略
+    """
+    return load_prompt_text(policy_path)
+
 
 # 模块导入时加载一次，供 ``runnable`` / ``stream_runnable`` 共用
 DEFAULT_SYSTEM_PROMPT: str = load_default_system_prompt()

@@ -24,7 +24,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import Runnable, RunnableWithMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
 from app.core.agent.default_model import BasicAdapterModel
-from app.core.agent.prompt_loader import DEFAULT_SYSTEM_PROMPT
+from app.core.agent.prompt.prompt_loader import DEFAULT_SYSTEM_PROMPT
 from app.core.agent.summarization import ConversationSummarization
 from app.core.config import get_settings
 from app.core.log_config import logger as log
