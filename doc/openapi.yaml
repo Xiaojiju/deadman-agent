@@ -1,309 +1,778 @@
-openapi: '3.1.0'
+# 由 doc/generate_openapi.py 根据 FastAPI 路由生成，可重复执行。
+# 生成: python doc/generate_openapi.py
+openapi: 3.1.0
 info:
-  title: 'Deadman Agent'
-  version: '0.1.0'
+  title: Deadman Agent
+  version: 0.1.0
+  description: 'Deadman Agent HTTP API。
+
+
+    聊天接口使用模块化 system prompt：**Core + Module（scene）+ Knobs（语言/语气/受众）+ Context（RAG 参考材料）**。详见仓库 ``app/core/agent/prompt/ARCHITECTURE.md``。'
 paths:
   /health:
     get:
-      summary: 'Health'
-      description:
-        |-
-          Check the health of the application.
-          
-          Returns:
-              A dictionary with the status of the application.
-      operationId: 'health_health_get'
+      tags:
+      - health
+      summary: Health
+      description: "检查应用的健康状态\n\nReturns:\n    健康检查数据"
+      operationId: health_health_get
       responses:
         '200':
-          description: 'Successful Response'
+          description: Successful Response
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponse_HealthData_'
   /chat:
     post:
-      summary: 'Chat'
-      description:
-        |-
-          发送用户消息并返回**整段**模型回复（JSON）；使用 ``session_id`` 区分会话以承载多轮上下文。
-
-          若需要**打字机式流式输出**，请使用 ``GET /chat/stream`` 或 ``POST /chat/stream``（SSE）；本接口使用非流式模型实例，与流式接口的底层 runnable 分离。
-      operationId: 'chat_chat_post'
       tags:
-        - 'chat'
-      parameters:
-        -
-          name: 'session_id'
-          in: 'query'
-          required: true
-          description: '会话 ID，用于关联历史与摘要等上下文。'
-          schema:
-            type: 'string'
-        -
-          name: 'user_input'
-          in: 'query'
-          required: true
-          description: '用户输入的纯文本内容。'
-          schema:
-            type: 'string'
+      - chat
+      summary: Chat
+      description: '发送用户消息并返回**整段**模型回复（JSON）。
+
+
+        请求体为 ``ChatRequest``：``scene`` 选择 manifest 场景（``default`` / ``rag_qa`` / ``customer_support``）；``output_language``、``tone``、``audience``
+        控制旋钮；``context`` 传入 RAG 参考材料（单独 system 层，非流式与流式共用）。
+
+
+        使用 ``session_id`` 区分多轮会话历史。流式输出请用 ``/chat/stream``。'
+      operationId: chat_chat_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            examples: &id001
+              general:
+                summary: 通用对话
+                value:
+                  session_id: sess-1
+                  user_input: 你好
+                  scene: default
+                  output_language: 简体中文
+                  tone: 正式
+                  audience: 普通用户
+              rag:
+                summary: RAG 问答
+                value:
+                  session_id: sess-1
+                  user_input: 如何退款？
+                  scene: rag_qa
+                  output_language: 简体中文
+                  tone: 简洁
+                  context: 文档：7 日内可申请退款。
+        required: true
       responses:
         '200':
-          description: 'Successful Response'
+          description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse_ChatData_'
+                $ref: '#/components/schemas/ApiResponse_ChatReplyData_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /chat/stream:
-    get:
-      summary: 'Chat stream (SSE)'
-      description:
-        |-
-          使用 **Server-Sent Events**（``Content-Type: text/event-stream``）流式返回模型增量，适合浏览器 ``EventSource``（仅支持 GET）实现打字机效果。
-
-          与 ``POST /chat`` 共用同一套 ``session_id`` / ``user_input`` query 参数；流式链路使用独立 ``stream_runnable``（底层模型 ``streaming=true``），非流式 ``POST /chat`` 使用同步模型实例。
-
-          **帧格式**：每个事件为 ``data: <单行 JSON>``，后跟空行 ``\\n\\n``。正文增量为 ``{"type":"token","delta":"..."}``；正常结束为 ``{"type":"done"}``；随后发送字面量 ``data: [DONE]`` 一行（兼容常见客户端）。异常时为 ``{"type":"error","message":"..."}``，仍会发送 ``done`` 与 ``[DONE]``。
-      operationId: 'chat_stream_get'
+    post:
       tags:
-        - 'chat'
-      parameters:
-        -
-          name: 'session_id'
-          in: 'query'
-          required: true
-          description: '会话 ID，与 ``POST /chat`` 相同，用于多轮上下文与历史持久化。'
-          schema:
-            type: 'string'
-        -
-          name: 'user_input'
-          in: 'query'
-          required: true
-          description: '用户输入的纯文本内容。'
-          schema:
-            type: 'string'
+      - chat
+      summary: Chat stream (SSE, POST)
+      description: '与 GET 语义相同，**请求体为 ``ChatRequest``**（推荐携带 ``context``）。
+
+
+        ``EventSource`` 仅支持 GET；POST 请用 ``fetch`` + ``ReadableStream`` 解析 SSE。'
+      operationId: chat_stream_post_chat_stream_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            examples: *id001
       responses:
         '200':
-          description: 'SSE 字节流（``text/event-stream``），事件体见 ``#/components/schemas`` 中以 ``ChatStream`` 前缀命名的各事件 schema。'
+          description: 同 GET /chat/stream
           headers:
             Cache-Control:
               schema:
-                type: 'string'
+                type: string
               description: '``no-cache``'
             Connection:
               schema:
-                type: 'string'
+                type: string
               description: '``keep-alive``'
             X-Accel-Buffering:
               schema:
-                type: 'string'
+                type: string
               description: '``no``（减轻 Nginx 等对响应的缓冲）'
           content:
             text/event-stream:
               schema:
-                type: 'string'
-                description: |
-                  SSE 文本流。每行 ``data:`` 后为 JSON 对象，类型见 ``ChatStreamTokenEvent`` / ``ChatStreamDoneEvent`` / ``ChatStreamErrorEvent``；流结束前追加 ``data: [DONE]``。
-              example: |
-                data: {"type":"token","delta":"你"}
+                type: string
+                description: 'SSE 文本流。每行 ``data:`` 后为 JSON，类型见 ``ChatStreamTokenEvent`` / ``ChatStreamDoneEvent``
+                  / ``ChatStreamErrorEvent``；流结束前追加 ``data: [DONE]``。'
+              example: 'data: {"type":"token","delta":"你"}
+
 
                 data: {"type":"token","delta":"好"}
 
+
                 data: {"type":"done"}
+
 
                 data: [DONE]
 
-    post:
-      summary: 'Chat stream (SSE) POST'
-      description:
-        |-
-          与 ``GET /chat/stream`` **语义相同**，以 POST 调用，便于在受限环境中用 ``fetch`` 拉取流（参数仍为 query，与 ``POST /chat`` 一致）。
 
-          注意：``EventSource`` 仅支持 GET；若需 POST 拉流，请使用 ``fetch`` + ``ReadableStream`` 解析 ``text/event-stream``。
-      operationId: 'chat_stream_post'
+                '
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
       tags:
-        - 'chat'
+      - chat
+      summary: Chat stream (SSE, GET)
+      description: '使用 **Server-Sent Events**（``text/event-stream``）流式返回增量，适合浏览器 ``EventSource``（仅支持 GET）。
+
+
+        Query 参数与 ``ChatRequest`` 字段一致；超长 ``context`` 建议用 POST。
+
+
+        **帧格式**：``data: {"type":"token","delta":"..."}``；结束 ``{"type":"done"}``；随后 ``data: [DONE]``；异常
+        ``{"type":"error","message":"..."}``。'
+      operationId: chat_stream_get_chat_stream_get
       parameters:
-        -
-          name: 'session_id'
-          in: 'query'
-          required: true
-          description: '会话 ID，与 ``POST /chat`` 相同。'
-          schema:
-            type: 'string'
-        -
-          name: 'user_input'
-          in: 'query'
-          required: true
-          description: '用户输入的纯文本内容。'
-          schema:
-            type: 'string'
+      - name: session_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          description: 会话 ID
+          title: Session Id
+        description: 会话 ID
+      - name: user_input
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          description: 用户输入
+          title: User Input
+        description: 用户输入
+      - name: scene
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/Scene'
+          description: prompt 场景
+          default: default
+        description: prompt 场景
+      - name: output_language
+        in: query
+        required: false
+        schema:
+          enum:
+          - 简体中文
+          - English
+          type: string
+          description: 输出语言
+          default: 简体中文
+          title: Output Language
+        description: 输出语言
+      - name: tone
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/Tone'
+          description: 语气
+          default: 正式
+        description: 语气
+      - name: audience
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 32
+          description: 受众
+          default: 普通用户
+          title: Audience
+        description: 受众
+      - name: context
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 32000
+          - type: 'null'
+          description: RAG 参考材料
+          title: Context
+        description: RAG 参考材料
+      - name: include_few_shot
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: 是否插入 Few-shot（仅 default 场景）
+          default: true
+          title: Include Few Shot
+        description: 是否插入 Few-shot（仅 default 场景）
       responses:
         '200':
-          description: '同 ``GET /chat/stream`` 的 SSE 响应。'
+          description: SSE 字节流
           headers:
             Cache-Control:
               schema:
-                type: 'string'
+                type: string
+              description: '``no-cache``'
             Connection:
               schema:
-                type: 'string'
+                type: string
+              description: '``keep-alive``'
             X-Accel-Buffering:
               schema:
-                type: 'string'
+                type: string
+              description: '``no``（减轻 Nginx 等对响应的缓冲）'
           content:
             text/event-stream:
               schema:
-                type: 'string'
-              example: |
-                data: {"type":"token","delta":"…"}
+                type: string
+                description: 'SSE 文本流。每行 ``data:`` 后为 JSON，类型见 ``ChatStreamTokenEvent`` / ``ChatStreamDoneEvent``
+                  / ``ChatStreamErrorEvent``；流结束前追加 ``data: [DONE]``。'
+              example: 'data: {"type":"token","delta":"你"}
+
+
+                data: {"type":"token","delta":"好"}
+
 
                 data: {"type":"done"}
 
+
                 data: [DONE]
+
+
+                '
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /chat/sessions:
+    get:
+      tags:
+      - chat-history
+      summary: List Chat Sessions
+      description: 分页列出已有聊天会话（扫描 ``data/history/*_messages.json``），按文件修改时间倒序。
+      operationId: list_chat_sessions_chat_sessions_get
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: 页码，从 1 开始
+          default: 1
+          title: Page
+        description: 页码，从 1 开始
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: 每页条数，最大 100
+          default: 20
+          title: Page Size
+        description: 每页条数，最大 100
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse_ChatSessionsPageData_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /chat/sessions/{session_id}/messages:
+    get:
+      tags:
+      - chat-history
+      summary: List Chat Messages
+      description: 分页查询指定 ``session_id`` 的聊天消息（磁盘全量 JSON，非模型上下文截断视图）。
+      operationId: list_chat_messages_chat_sessions__session_id__messages_get
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: 页码，从 1 开始
+          default: 1
+          title: Page
+        description: 页码，从 1 开始
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: 每页条数，最大 100
+          default: 20
+          title: Page Size
+        description: 每页条数，最大 100
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse_ChatMessagesPageData_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
-    ApiResponse_HealthData_:
+    ApiResponse_ChatMessagesPageData_:
       properties:
-        status:
-          type: 'string'
-          enum:
-            - 'ok'
-            - 'error'
-          title: 'Status'
-          description: 'The status of the response.'
         code:
-          type: 'integer'
-          title: 'Code'
-          description: 'The code of the response.'
+          type: integer
+          title: Code
+          description: The code of the response.
           default: 0
         message:
-          type: 'string'
-          title: 'Message'
-          description: 'The message of the response.'
-          default: 'Success'
+          type: string
+          title: Message
+          description: The message of the response.
+          default: Success
         timestamp:
-          type: 'integer'
-          title: 'Timestamp'
-          description: 'The timestamp of the response.'
+          type: integer
+          title: Timestamp
+          description: The timestamp of the response.
         data:
           anyOf:
-            -
-              $ref: '#/components/schemas/HealthData'
-            -
-              type: 'null'
-          description: 'The data of the response.'
-      type: 'object'
+          - $ref: '#/components/schemas/ChatMessagesPageData'
+          - type: 'null'
+          description: The data of the response.
+      type: object
+      title: ApiResponse[ChatMessagesPageData]
+    ApiResponse_ChatReplyData_:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: The code of the response.
+          default: 0
+        message:
+          type: string
+          title: Message
+          description: The message of the response.
+          default: Success
+        timestamp:
+          type: integer
+          title: Timestamp
+          description: The timestamp of the response.
+        data:
+          anyOf:
+          - $ref: '#/components/schemas/ChatReplyData'
+          - type: 'null'
+          description: The data of the response.
+      type: object
+      title: ApiResponse[ChatReplyData]
+    ApiResponse_ChatSessionsPageData_:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: The code of the response.
+          default: 0
+        message:
+          type: string
+          title: Message
+          description: The message of the response.
+          default: Success
+        timestamp:
+          type: integer
+          title: Timestamp
+          description: The timestamp of the response.
+        data:
+          anyOf:
+          - $ref: '#/components/schemas/ChatSessionsPageData'
+          - type: 'null'
+          description: The data of the response.
+      type: object
+      title: ApiResponse[ChatSessionsPageData]
+    ApiResponse_HealthData_:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: The code of the response.
+          default: 0
+        message:
+          type: string
+          title: Message
+          description: The message of the response.
+          default: Success
+        timestamp:
+          type: integer
+          title: Timestamp
+          description: The timestamp of the response.
+        data:
+          anyOf:
+          - $ref: '#/components/schemas/HealthData'
+          - type: 'null'
+          description: The data of the response.
+      type: object
+      title: ApiResponse[HealthData]
+    ChatMessageRecord:
+      properties:
+        index:
+          type: integer
+          title: Index
+          description: 在会话中的序号，从 0 开始
+        id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Id
+          description: LangChain 消息 id（若有）
+        role:
+          type: string
+          title: Role
+          description: 角色：human / assistant / system / tool 等
+        type:
+          type: string
+          title: Type
+          description: LangChain 消息 type 字段
+        content:
+          type: string
+          title: Content
+          description: 消息正文
+      type: object
       required:
-        - 'status'
-        - 'timestamp'
-      title: 'ApiResponse[HealthData]'
+      - index
+      - role
+      - type
+      - content
+      title: ChatMessageRecord
+      description: 单条历史消息（来自磁盘 JSON）。
+    ChatMessagesPageData:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+        items:
+          items:
+            $ref: '#/components/schemas/ChatMessageRecord'
+          type: array
+          title: Items
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+      type: object
+      required:
+      - session_id
+      - items
+      - pagination
+      title: ChatMessagesPageData
+      description: 会话消息分页数据。
+    ChatReplyData:
+      properties:
+        role:
+          type: string
+          title: Role
+          description: 消息角色
+          default: assistant
+        content:
+          type: string
+          title: Content
+          description: 助手回复正文
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+          description: 模型名称
+        finish_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finish Reason
+          description: 结束原因
+        scene:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Scene
+          description: 本次使用的 prompt 场景
+        output_language:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Output Language
+          description: 本次输出语言设置
+        tone:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tone
+          description: 本次语气设置
+      type: object
+      required:
+      - content
+      title: ChatReplyData
+      description: 单轮模型回复（从 LangChain 消息抽取的精简 JSON 结构）
+    ChatRequest:
+      properties:
+        session_id:
+          type: string
+          minLength: 1
+          title: Session Id
+          description: 会话 ID
+        user_input:
+          type: string
+          minLength: 1
+          title: User Input
+          description: 用户输入
+        scene:
+          $ref: '#/components/schemas/Scene'
+          description: prompt 场景，对应 manifest.yaml
+          default: default
+        output_language:
+          type: string
+          enum:
+          - 简体中文
+          - English
+          title: Output Language
+          description: 输出语言
+          default: 简体中文
+        tone:
+          $ref: '#/components/schemas/Tone'
+          description: 回复语气
+          default: 正式
+        audience:
+          type: string
+          maxLength: 32
+          title: Audience
+          description: 目标受众
+          default: 普通用户
+        context:
+          anyOf:
+          - type: string
+            maxLength: 32000
+          - type: 'null'
+          title: Context
+          description: RAG 参考材料；为空时注入占位文案
+        include_few_shot:
+          type: boolean
+          title: Include Few Shot
+          description: 是否插入 Few-shot 样例（仅 scene=default 时生效，用于对比格式与边界）
+          default: true
+      type: object
+      required:
+      - session_id
+      - user_input
+      title: ChatRequest
+      description: 聊天请求体（模块化 prompt：场景 + 旋钮 + 可选 RAG 上下文）。
+    ChatSessionSummary:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+          description: 会话 ID
+        message_count:
+          type: integer
+          title: Message Count
+          description: 该会话消息条数
+        updated_at_ms:
+          type: integer
+          title: Updated At Ms
+          description: 历史文件最后修改时间（毫秒时间戳）
+      type: object
+      required:
+      - session_id
+      - message_count
+      - updated_at_ms
+      title: ChatSessionSummary
+      description: 会话摘要。
+    ChatSessionsPageData:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ChatSessionSummary'
+          type: array
+          title: Items
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+      type: object
+      required:
+      - items
+      - pagination
+      title: ChatSessionsPageData
+      description: 会话列表分页数据。
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
     HealthData:
       properties:
         status:
-          type: 'string'
-          const: 'ok'
-          title: 'Status'
-          description: 'The status of the application.'
+          type: string
+          enum:
+          - ok
+          - error
+          - warning
+          title: Status
+          description: 状态
         version:
-          type: 'string'
-          title: 'Version'
-          description: 'The version of the application.'
-      type: 'object'
+          type: string
+          title: Version
+          description: 版本
+      type: object
       required:
-        - 'status'
-        - 'version'
-      title: 'HealthData'
-      description:
-        |-
-          Health data.
-          
-          Attributes:
-              status: The status of the application.
-              version: The version of the application.
-    ApiResponse_ChatData_:
+      - status
+      - version
+      title: HealthData
+      description: 健康检查数据
+    PaginationMeta:
       properties:
-        code:
-          type: 'integer'
-          title: 'Code'
-          description: '业务响应码（0 表示成功）。'
-          default: 0
-        message:
-          type: 'string'
-          title: 'Message'
-          description: '响应描述信息。'
-          default: 'Success'
-        timestamp:
-          type: 'integer'
-          title: 'Timestamp'
-          description: '响应时间戳（毫秒）。'
-        data:
-          anyOf:
-            -
-              $ref: '#/components/schemas/ChatReplyData'
-            -
-              type: 'null'
-          description: '聊天成功时返回的助手回复摘要。'
-      type: 'object'
+        page:
+          type: integer
+          title: Page
+          description: 当前页码，从 1 开始
+        page_size:
+          type: integer
+          title: Page Size
+          description: 每页条数
+        total:
+          type: integer
+          title: Total
+          description: 总条数
+        total_pages:
+          type: integer
+          title: Total Pages
+          description: 总页数
+      type: object
       required:
-        - 'code'
-        - 'message'
-        - 'timestamp'
-      title: 'ApiResponse[ChatReplyData]'
-    ChatReplyData:
-      type: 'object'
-      description: '单轮助手回复（精简字段，便于前端展示）。'
-      required:
-        - 'content'
+      - page
+      - page_size
+      - total
+      - total_pages
+      title: PaginationMeta
+      description: 分页元数据。
+    Scene:
+      type: string
+      enum:
+      - default
+      - rag_qa
+      - customer_support
+      title: Scene
+      description: '业务场景，对应 ``manifest.yaml`` 中的 ``scenes`` 键。
+
+
+        每个成员决定在组装时追加哪些 ``modules/*.md`` 片段。'
+    Tone:
+      type: string
+      enum:
+      - 正式
+      - 简洁
+      - 友好
+      - 专业
+      title: Tone
+      description: '语气白名单。
+
+
+        限制为枚举值，避免将用户任意输入直接拼进 system，降低 prompt 注入风险。'
+    ValidationError:
       properties:
-        role:
-          type: 'string'
-          description: '消息角色，默认 assistant。'
-          default: 'assistant'
-        content:
-          type: 'string'
-          description: '助手回复正文。'
-        model:
-          type:
-            - 'string'
-            - 'null'
-          description: '模型名称（若有）。'
-        finish_reason:
-          type:
-            - 'string'
-            - 'null'
-          description: '结束原因（若有）。'
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
     ChatStreamTokenEvent:
-      type: 'object'
-      description: 'SSE 中单条 ``data:`` 行解析后的 JSON（正文增量）。'
+      type: object
+      description: SSE 正文增量事件。
       required:
-        - 'type'
-        - 'delta'
+      - type
+      - delta
       properties:
         type:
-          type: 'string'
-          const: 'token'
+          type: string
+          const: token
         delta:
-          type: 'string'
-          description: '本帧追加的 UTF-8 文本片段，客户端顺序拼接即为完整回复。'
+          type: string
+          description: 本帧 UTF-8 文本片段
     ChatStreamDoneEvent:
-      type: 'object'
-      description: 'SSE 流正常结束信号（在 ``data: [DONE]`` 之前发送）。'
+      type: object
       required:
-        - 'type'
+      - type
       properties:
         type:
-          type: 'string'
-          const: 'done'
+          type: string
+          const: done
     ChatStreamErrorEvent:
-      type: 'object'
-      description: '流式过程中发生错误时的事件（随后仍会发送 ``ChatStreamDoneEvent`` 与 ``[DONE]``）。'
+      type: object
       required:
-        - 'type'
-        - 'message'
+      - type
+      - message
       properties:
         type:
-          type: 'string'
-          const: 'error'
+          type: string
+          const: error
         message:
-          type: 'string'
-          description: '错误描述（面向调试或前端提示）。'
+          type: string
+tags:
+- name: health
+  description: 健康检查
+- name: chat
+  description: 多轮对话（模块化 prompt + 可选流式 SSE）
+- name: chat-history
+  description: 聊天历史查询（分页）

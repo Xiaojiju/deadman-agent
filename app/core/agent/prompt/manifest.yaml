@@ -1,0 +1,18 @@
+# 场景 ID -> 按顺序拼接的 Markdown 片段（路径相对本目录）
+# 顺序：Core（不变）→ Module（场景）→ Knobs 占位在 core/base.md 末尾由 Composer 注入
+
+scenes:
+  default:
+    - core/base.md
+    - core/safety.md
+    - modules/general_chat.md
+
+  rag_qa:
+    - core/base.md
+    - core/safety.md
+    - modules/rag_qa.md
+
+  customer_support:
+    - core/base.md
+    - core/safety.md
+    - modules/customer_support.md

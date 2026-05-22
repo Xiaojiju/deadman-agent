@@ -64,4 +64,8 @@ class ConversationSummarization:
         Returns:
             str: 摘要
         """
-        return await self.summarize(existing_summary, messages)
+        ai_response = await self.model.ainvoke(
+            self.prompt.invoke({"existing_summary": existing_summary, "messages": messages}),
+            stop=["\n\n"],
+        )
+        return ai_response.content.strip()

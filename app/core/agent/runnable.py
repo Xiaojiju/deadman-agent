@@ -5,6 +5,7 @@
  - 已有普通 LCEL 链，想低成本加历史，不想重构为 Agent；
  - 追求轻量、低延迟、易调试。
 """
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -23,8 +24,16 @@ from langchain_core.messages import (
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import Runnable, RunnableWithMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.runnables import run_in_executor
 from app.core.agent.default_model import BasicAdapterModel
-from app.core.agent.prompt.prompt_loader import DEFAULT_SYSTEM_PROMPT
+from app.core.agent.prompt import (
+    CONTEXT_SYSTEM_TEMPLATE,
+    CONTEXT_TEMPLATE_KEY,
+    EMPTY_CONTEXT_PLACEHOLDER,
+    compose_system_prompt,
+)
+from app.core.agent.prompt.few_shot_loader import few_shot_message_tuples
+from app.core.agent.prompt.knobs import PromptKnobs, Scene
 from app.core.agent.summarization import ConversationSummarization
 from app.core.config import get_settings
 from app.core.log_config import logger as log
@@ -38,6 +47,10 @@ DEFAULT_HISTORY_SUMMARY_FILE = "summary.json"
 DEFAULT_HISTORY_SUMMARY_FILE_PATH = os.path.join(DEFAULT_HISTORY_DIR, DEFAULT_HISTORY_SUMMARY_FILE)
 DEFAULT_SESSION_FILE = "sessions.json"
 DEFAULT_SESSION_FILE_PATH = os.path.join(DEFAULT_HISTORY_DIR, DEFAULT_SESSION_FILE)
+
+# ChatPromptTemplate 变量名：Policy（Core+Module+Knobs）与 Context（RAG 材料）
+SYSTEM_POLICY_KEY = "system_policy"
+
 
 class SummaryContext:
     """摘要上下文
@@ -206,6 +219,7 @@ class RollingWindowChatHistory(DefaultMessageHistory):
         self.keep_recent = keep_recent
         self._summary: SummaryContext | dict[str, Any] | None = None
         self._recent: list[BaseMessage] = []
+        self._summary_tasks: set[asyncio.Task[None]] = set()
 
     def _read_summary(self) -> SummaryContext | None:
         """读取摘要
@@ -225,6 +239,21 @@ class RollingWindowChatHistory(DefaultMessageHistory):
             return None
         return self._summary
 
+    @staticmethod
+    def _summary_text_and_last_id(
+        record: SummaryContext | dict[str, Any],
+    ) -> tuple[str, str] | None:
+        """从磁盘或内存中的摘要记录解析 summary 文本与 last_id。"""
+        if isinstance(record, dict):
+            text = record.get("summary") or ""
+            last_id = record.get("last_id") or ""
+        else:
+            text = getattr(record, "summary", "") or ""
+            last_id = getattr(record, "last_id", "") or ""
+        if not last_id:
+            return None
+        return str(text), str(last_id)
+
     @property
     def messages(self) -> list[BaseMessage]:
         """获取会话历史记录（含摘要系统消息与按 last_id 截断后的消息）。"""
@@ -232,31 +261,80 @@ class RollingWindowChatHistory(DefaultMessageHistory):
         summary = self._read_summary()
         if not summary:
             return base_messages
-        messages = [m for m in base_messages if m.id is not None and m.id >= summary.last_id]
-        messages.insert(0, SystemMessage(content=summary.summary))
+        parsed = self._summary_text_and_last_id(summary)
+        if not parsed:
+            return base_messages
+        summary_text, last_id = parsed
+        messages = [m for m in base_messages if m.id is not None and m.id >= last_id]
+        messages.insert(0, SystemMessage(content=summary_text))
         return messages
 
-    async def _atrigger_summary(self) -> None:
-        """异步触发摘要
-        
-        Returns:
-            None
-        """
+    def _prepare_summary_job(
+        self,
+    ) -> tuple[str, list[BaseMessage], str] | None:
+        """若达到阈值则裁剪 ``_recent`` 并返回摘要任务参数，否则返回 ``None``。"""
         if len(self._recent) < self.trigger_at:
-            return
+            return None
         to_compress = self._recent[: -self.keep_recent]
         self._recent = self._recent[-self.keep_recent :]
         last_id = self._recent[-1].id
-        self._summary = await self.summarizer.summarize(self._read_summary(), to_compress)
-        summary_data = self._read_file(self._target_summary_path)
-        summary_data.remove(lambda x: x['session_id'] == self.session_id)
-        self._summary = SummaryContext(
-            session_id=self.session_id,
-            summary=self._summary,
-            last_id=last_id,
-        )
+        if last_id is None:
+            log.warning(
+                "跳过摘要：最近消息缺少 id, session_id=%s",
+                self.session_id,
+            )
+            return None
+        existing = self._read_summary()
+        existing_text = ""
+        if existing:
+            parsed = self._summary_text_and_last_id(existing)
+            if parsed:
+                existing_text = parsed[0]
+        return existing_text, to_compress, last_id
+
+    def _persist_summary(self, new_summary: str, last_id: str) -> None:
+        """将摘要写入 ``summary.json``。"""
+        raw = self._read_file(self._target_summary_path)
+        summary_data: list[dict[str, Any]] = raw if isinstance(raw, list) else []
+        summary_data = [
+            x for x in summary_data if x.get("session_id") != self.session_id
+        ]
+        self._summary = {
+            "session_id": self.session_id,
+            "summary": new_summary,
+            "last_id": last_id,
+        }
         summary_data.append(self._summary)
         self._write_file(self._target_summary_path, summary_data)
+
+    def _trigger_summary(self) -> None:
+        """同步触发摘要（阻塞直至 LLM 返回）。"""
+        job = self._prepare_summary_job()
+        if job is None:
+            return
+        existing_text, to_compress, last_id = job
+        new_summary = self.summarizer.summarize(existing_text, to_compress)
+        self._persist_summary(new_summary, last_id)
+
+    async def _atrigger_summary(self) -> None:
+        """异步触发摘要（不阻塞当前协程外的调用方）。"""
+        job = self._prepare_summary_job()
+        if job is None:
+            return
+        existing_text, to_compress, last_id = job
+        new_summary = await self.summarizer.asummarize(existing_text, to_compress)
+        self._persist_summary(new_summary, last_id)
+
+    def _schedule_summary(self) -> None:
+        """在后台调度摘要：有 running loop 则 ``create_task``，否则同步执行。"""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._trigger_summary()
+            return
+        task = loop.create_task(self._atrigger_summary())
+        self._summary_tasks.add(task)
+        task.add_done_callback(self._summary_tasks.discard)
 
     def add_messages(self, messages: Sequence[BaseMessage]) -> None:
         """添加会话历史记录
@@ -266,8 +344,18 @@ class RollingWindowChatHistory(DefaultMessageHistory):
         """
         self._recent.extend(messages)
         super().add_messages(messages)
+        self._schedule_summary()
 
-        self._atrigger_summary()
+    async def aadd_messages(self, messages: Sequence[BaseMessage]) -> None:
+        """异步添加会话历史；摘要在后台 task 中执行，不拉长 ``ainvoke`` 等待时间。"""
+        self._recent.extend(messages)
+        await run_in_executor(
+            None,
+            DefaultMessageHistory.add_messages,
+            self,
+            messages,
+        )
+        self._schedule_summary()
 
     def clear(self) -> None:
         self._recent = []
@@ -322,93 +410,158 @@ class RunnableWithHistory:
         callable_history: Callable[[], BaseChatMessageHistory] | None = None,
         conversation_summarizer: ConversationSummarization | None = None,
         system_prompt: str | list[str] | None = None,
+        default_scene: Scene = Scene.DEFAULT,
+        default_knobs: PromptKnobs | None = None,
         input_message_key: str = "input",
         output_message_key: str = "output",
-        history_key: str = "history"
+        history_key: str = "history",
     ) -> None:
         self.model = model
         self.callable_history = callable_history
         self.conversation_summarizer = conversation_summarizer
-        self.system_prompt = system_prompt
+        self._fixed_system_prompt = system_prompt
+        self.default_scene = default_scene
+        self.default_knobs = default_knobs or PromptKnobs()
         self.input_message_key = input_message_key
         self.output_message_key = output_message_key
         self.history_key = history_key
         self._session_store: dict[str, RollingWindowChatHistory] = {}
-        self.runnable = self._runnable()
-
-    def _runnable(self) -> Runnable:
-        """构建可执行的轻量多轮对话
-        
-        该方法主要是用于构建可执行的轻量多轮对话，构建的RunnableWithMessageHistory
-        是langchain_core.runnables.RunnableWithMessageHistory的实例。
-        Returns:
-            Runnable: 可执行的轻量多轮对话
-        """
-        system_messages: list[BaseMessage] = []
-        if self.system_prompt is not None:
-            if isinstance(self.system_prompt, str):
-                system_messages.append(SystemMessage(content=self.system_prompt))
-            elif isinstance(self.system_prompt, list):
-                system_messages.extend(SystemMessage.model_validate(self.system_prompt))
-        else:
-            system_messages.append(SystemMessage(content="You are a helpful assistant."))
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                *system_messages,
-                MessagesPlaceholder(variable_name=self.history_key),
-                ("human", f"{{{self.input_message_key}}}"),
-            ]
-        )
-        prompt_model_chain = prompt | self.model
-
-        session_history = make_get_session_history(
+        self._get_session_history = make_get_session_history(
             self.conversation_summarizer or ConversationSummarization(),
             self._session_store,
         )
-        return RunnableWithMessageHistory(
-            prompt_model_chain,
-            session_history,
+        self._runnable_cache: dict[tuple[str, bool], Runnable] = {}
+
+    def _build_chat_prompt(
+        self,
+        scene: Scene,
+        *,
+        include_few_shot: bool,
+    ) -> ChatPromptTemplate:
+        """组装 ChatPromptTemplate：system → [few-shot] → history → 本轮 human。"""
+        message_specs: list[Any] = [
+            ("system", f"{{{SYSTEM_POLICY_KEY}}}"),
+            ("system", CONTEXT_SYSTEM_TEMPLATE),
+            *few_shot_message_tuples(scene, enabled=include_few_shot),
+            MessagesPlaceholder(variable_name=self.history_key),
+            ("human", f"{{{self.input_message_key}}}"),
+        ]
+        return ChatPromptTemplate.from_messages(message_specs)
+
+    def _get_runnable(self, scene: Scene, *, include_few_shot: bool) -> Runnable:
+        """按场景与是否启用 Few-shot 获取（并缓存）RunnableWithMessageHistory。"""
+        key = (scene.value, include_few_shot)
+        cached = self._runnable_cache.get(key)
+        if cached is not None:
+            return cached
+
+        prompt = self._build_chat_prompt(scene, include_few_shot=include_few_shot)
+        wrapped = RunnableWithMessageHistory(
+            prompt | self.model,
+            self._get_session_history,
             input_messages_key=self.input_message_key,
             output_messages_key=self.output_message_key,
             history_messages_key=self.history_key,
         )
+        self._runnable_cache[key] = wrapped
+        return wrapped
+
+    def _resolve_policy(self, scene: Scene | None, knobs: PromptKnobs | None) -> str:
+        """组装 system policy；若构造时传入 ``system_prompt`` 字符串则固定使用。"""
+        if isinstance(self._fixed_system_prompt, str):
+            return self._fixed_system_prompt
+        return compose_system_prompt(
+            scene or self.default_scene,
+            knobs or self.default_knobs,
+        )
+
+    def _build_chain_input(
+        self,
+        user_input: str,
+        *,
+        scene: Scene | None = None,
+        knobs: PromptKnobs | None = None,
+        context: str | None = None,
+    ) -> dict[str, Any]:
+        """构建传入 LCEL 链的输入 dict（含 policy、context、human 消息）。"""
+        resolved_knobs = knobs or self.default_knobs
+        policy = self._resolve_policy(scene, resolved_knobs)
+        ctx_body = (context or "").strip() or EMPTY_CONTEXT_PLACEHOLDER
+        return {
+            self.input_message_key: HumanMessage(content=user_input),
+            SYSTEM_POLICY_KEY: policy,
+            CONTEXT_TEMPLATE_KEY: ctx_body,
+        }
 
     def invoke(
         self,
         session_id: str,
         user_input: str,
+        *,
+        scene: Scene | None = None,
+        knobs: PromptKnobs | None = None,
+        context: str | None = None,
+        include_few_shot: bool = True,
     ):
         """执行模型
-        
+
         Args:
-            session_id: 会话ID
-            user_input: 用户输入文本 
+            session_id: 会话 ID
+            user_input: 用户输入文本
+            scene: prompt 场景；默认使用构造时的 ``default_scene``
+            knobs: 语言/语气/受众；默认使用 ``default_knobs``
+            context: RAG 参考材料；空白时使用占位文案
+            include_few_shot: 是否在模板中插入 Few-shot（仅 ``Scene.DEFAULT`` 生效）
+
         Returns:
-            dict[str, Any]: 输出
+            LangChain 链路输出（多为 ``AIMessage``）
         """
-        user_message = HumanMessage(content=user_input)
-        response = self.runnable.invoke(
-            {self.input_message_key: user_message},
+        resolved_scene = scene or self.default_scene
+        chain_input = self._build_chain_input(
+            user_input,
+            scene=resolved_scene,
+            knobs=knobs,
+            context=context,
+        )
+        runnable = self._get_runnable(resolved_scene, include_few_shot=include_few_shot)
+        return runnable.invoke(
+            chain_input,
             config={"configurable": {"session_id": session_id}},
         )
-        return response
 
     def invoke_stream(
         self,
         session_id: str,
         user_input: str,
+        *,
+        scene: Scene | None = None,
+        knobs: PromptKnobs | None = None,
+        context: str | None = None,
+        include_few_shot: bool = True,
     ) -> Iterator[Any]:
         """流式执行模型（供 SSE 等场景迭代 chunk）。
 
         Args:
-            session_id: 会话ID
+            session_id: 会话 ID
             user_input: 用户输入文本
+            scene: prompt 场景
+            knobs: 语言/语气/受众
+            context: RAG 参考材料
+            include_few_shot: 是否插入 Few-shot（仅 default 场景）
+
         Yields:
-            LangChain 链路产生的流式 chunk（多为 ``AIMessageChunk``）。
+            LangChain 链路产生的流式 chunk（多为 ``AIMessageChunk``）
         """
-        user_message = HumanMessage(content=user_input)
-        yield from self.runnable.stream(
-            {self.input_message_key: user_message},
+        resolved_scene = scene or self.default_scene
+        chain_input = self._build_chain_input(
+            user_input,
+            scene=resolved_scene,
+            knobs=knobs,
+            context=context,
+        )
+        runnable = self._get_runnable(resolved_scene, include_few_shot=include_few_shot)
+        yield from runnable.stream(
+            chain_input,
             config={"configurable": {"session_id": session_id}},
         )
 
@@ -418,7 +571,7 @@ settings = get_settings()
 stream_runnable = RunnableWithHistory(
     model=BasicAdapterModel.from_settings(settings, stream=True),
     conversation_summarizer=ConversationSummarization(),
-    system_prompt=DEFAULT_SYSTEM_PROMPT,
+    default_scene=Scene.DEFAULT,
     input_message_key="input",
     output_message_key="output",
     history_key="history",
@@ -428,7 +581,7 @@ stream_runnable = RunnableWithHistory(
 runnable = RunnableWithHistory(
     model=BasicAdapterModel.from_settings(settings),
     conversation_summarizer=ConversationSummarization(),
-    system_prompt=DEFAULT_SYSTEM_PROMPT,
+    default_scene=Scene.DEFAULT,
     input_message_key="input",
     output_message_key="output",
     history_key="history",
