@@ -12,7 +12,7 @@ from app.api.schemas_chat import ChatReplyData, ChatRequest, chat_reply_from_inv
 from app.api.stream_chat import iter_chat_sse
 from app.core.agent.prompt.knobs import Scene, Tone
 from app.core.agent.runnable import (
-    runnable as chat_runnable,
+    completation_runnable as chat_runnable,
     stream_runnable as chat_stream_runnable,
 )
 

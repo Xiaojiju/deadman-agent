@@ -578,7 +578,7 @@ stream_runnable = RunnableWithHistory(
 )
 
 # 非流式执行模型
-runnable = RunnableWithHistory(
+completation_runnable = RunnableWithHistory(
     model=BasicAdapterModel.from_settings(settings),
     conversation_summarizer=ConversationSummarization(),
     default_scene=Scene.DEFAULT,
