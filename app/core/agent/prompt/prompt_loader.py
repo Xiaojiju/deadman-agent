@@ -20,6 +20,9 @@ log = logging.getLogger(__name__)
 PROMPT_DIR: Path = Path(__file__).resolve().parent
 """prompt 包根目录（含 ``core/``、``modules/``、``manifest.yaml``）。"""
 
+MANIFEST_BASENAME = "manifest.yaml"
+"""场景清单与版本元数据文件名。"""
+
 LEGACY_SYSTEM_PROMPT_BASENAME = "system_prompt.md"
 """遗留单文件提示词文件名；仅 ``load_legacy_system_prompt`` 使用。"""
 

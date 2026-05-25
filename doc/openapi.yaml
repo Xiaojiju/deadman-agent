@@ -354,6 +354,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /chat/prompt/meta:
+    get:
+      tags:
+      - prompt
+      summary: Get Chat Prompt Meta
+      description: 返回当前加载的 Prompt 资产包版本（prompt_version、pack_format、scene 列表），用于 A/B 记录与回滚对照。与 pyproject
+        应用版本分离。
+      operationId: get_chat_prompt_meta_chat_prompt_meta_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse_PromptPackMetaData_'
 components:
   schemas:
     ApiResponse_ChatMessagesPageData_:
@@ -448,6 +463,29 @@ components:
           description: The data of the response.
       type: object
       title: ApiResponse[HealthData]
+    ApiResponse_PromptPackMetaData_:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: The code of the response.
+          default: 0
+        message:
+          type: string
+          title: Message
+          description: The message of the response.
+          default: Success
+        timestamp:
+          type: integer
+          title: Timestamp
+          description: The timestamp of the response.
+        data:
+          anyOf:
+          - $ref: '#/components/schemas/PromptPackMetaData'
+          - type: 'null'
+          description: The data of the response.
+      type: object
+      title: ApiResponse[PromptPackMetaData]
     ChatMessageRecord:
       properties:
         index:
@@ -688,6 +726,49 @@ components:
       - total_pages
       title: PaginationMeta
       description: 分页元数据。
+    PromptPackMetaData:
+      properties:
+        prompt_version:
+          type: string
+          title: Prompt Version
+          description: Prompt 文案版本，见 prompt/CHANGELOG.md
+        prompt_pack_format:
+          type: integer
+          title: Prompt Pack Format
+          description: Prompt 契约格式版本
+        supported_pack_format:
+          type: integer
+          title: Supported Pack Format
+          description: 当前应用代码支持的 format
+        app_compat_min:
+          type: string
+          title: App Compat Min
+          description: manifest 声明的建议最低应用版本
+        scene_ids:
+          items:
+            type: string
+          type: array
+          title: Scene Ids
+          description: manifest 中已配置的场景 ID
+        app_version:
+          type: string
+          title: App Version
+          description: 当前运行的应用版本（pyproject）
+        changelog_path:
+          type: string
+          title: Changelog Path
+          description: 变更日志相对仓库路径
+          default: app/core/agent/prompt/CHANGELOG.md
+      type: object
+      required:
+      - prompt_version
+      - prompt_pack_format
+      - supported_pack_format
+      - app_compat_min
+      - scene_ids
+      - app_version
+      title: PromptPackMetaData
+      description: 当前加载的 Prompt 资产包元数据。
     Scene:
       type: string
       enum:
@@ -776,3 +857,5 @@ tags:
   description: 多轮对话（模块化 prompt + 可选流式 SSE）
 - name: chat-history
   description: 聊天历史查询（分页）
+- name: prompt
+  description: Prompt 资产包版本与契约

@@ -1,5 +1,11 @@
-# 场景 ID -> 按顺序拼接的 Markdown 片段（路径相对本目录）
-# 顺序：Core（不变）→ Module（场景）→ Knobs 占位在 core/base.md 末尾由 Composer 注入
+# Prompt 资产包清单（路径均相对本目录）
+# prompt_version：文案/策略版本，见 CHANGELOG.md
+# prompt_pack_format：与应用的契约版本，须与 composer.SUPPORTED_PROMPT_PACK_FORMAT 一致
+# app_compat_min：建议搭配的应用最低版本（pyproject.toml），仅文档用途
+
+prompt_version: "1.1.0"
+prompt_pack_format: 1
+app_compat_min: "0.1.0"
 
 scenes:
   default:
@@ -16,3 +22,9 @@ scenes:
     - core/base.md
     - core/safety.md
     - modules/customer_support.md
+
+  # A/B 实验：复制 default 片段路径，改文件名或模块后再把流量切到 default_exp
+  # default_exp:
+  #   - core/base.md
+  #   - core/safety.md
+  #   - modules/general_chat.md

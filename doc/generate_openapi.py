@@ -80,6 +80,7 @@ def build_spec() -> dict:
         ("health", "健康检查"),
         ("chat", "多轮对话（模块化 prompt + 可选流式 SSE）"),
         ("chat-history", "聊天历史查询（分页）"),
+        ("prompt", "Prompt 资产包版本与契约"),
     ):
         if name not in tag_names:
             spec["tags"].append({"name": name, "description": desc})
@@ -114,6 +115,12 @@ def build_spec() -> dict:
             },
         },
     }
+
+    if "/chat/prompt/meta" in paths and "get" in paths["/chat/prompt/meta"]:
+        paths["/chat/prompt/meta"]["get"]["description"] = (
+            "返回当前加载的 Prompt 资产包版本（prompt_version、pack_format、scene 列表），"
+            "用于 A/B 记录与回滚对照。与 pyproject 应用版本分离。"
+        )
 
     if "/chat/sessions" in paths and "get" in paths["/chat/sessions"]:
         paths["/chat/sessions"]["get"]["description"] = (

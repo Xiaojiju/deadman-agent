@@ -39,6 +39,12 @@ from app.core.agent.prompt.composer import (
     DEFAULT_COMPOSED_SYSTEM_PROMPT,
     SystemPromptComposer,
     compose_system_prompt,
+    get_prompt_pack_meta,
+)
+from app.core.agent.prompt.prompt_version import (
+    SUPPORTED_PROMPT_PACK_FORMAT,
+    PromptPackMeta,
+    UnsupportedPromptPackFormatError,
 )
 from app.core.agent.prompt.context import (
     CONTEXT_SYSTEM_TEMPLATE,
@@ -54,9 +60,13 @@ __all__ = [
     "EMPTY_CONTEXT_PLACEHOLDER",
     "DEFAULT_COMPOSED_SYSTEM_PROMPT",
     "PromptKnobs",
+    "PromptPackMeta",
     "Scene",
+    "SUPPORTED_PROMPT_PACK_FORMAT",
     "SystemPromptComposer",
     "Tone",
+    "UnsupportedPromptPackFormatError",
     "build_context_system_message",
     "compose_system_prompt",
+    "get_prompt_pack_meta",
 ]

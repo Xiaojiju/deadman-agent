@@ -18,15 +18,19 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 
-import yaml
-
 from app.core.agent.prompt.knobs import PromptKnobs, Scene
-from app.core.agent.prompt.prompt_loader import PROMPT_DIR, load_prompt_text
+from app.core.agent.prompt.prompt_loader import (
+    MANIFEST_BASENAME,
+    PROMPT_DIR,
+    load_prompt_text
+)
+from app.core.agent.prompt.prompt_version import (
+    PromptPackMeta,
+    load_prompt_pack_meta,
+    validate_pack_format,
+)
 
 log = logging.getLogger(__name__)
-
-MANIFEST_BASENAME = "manifest.yaml"
-"""场景清单文件名，位于 prompt 根目录。"""
 
 _FRAGMENT_SEPARATOR = "\n\n---\n\n"
 """各 Markdown 片段之间的分隔符，便于日志与 diff 阅读。"""
@@ -82,30 +86,22 @@ def _cached_fragment(root_str: str, relative: str, mtime_ns: int) -> str:
 
 
 @lru_cache(maxsize=1)
-def _cached_manifest(root_str: str, mtime_ns: int) -> dict[str, list[str]]:
-    """解析并缓存 ``manifest.yaml`` 中的 ``scenes`` 映射。
+def _cached_manifest_pack(root_str: str, mtime_ns: int) -> PromptPackMeta:
+    """解析并缓存 ``manifest.yaml``（含版本元数据与 scenes）。"""
+    _ = mtime_ns  # 仅作缓存键，manifest 变更后失效
+    meta = load_prompt_pack_meta(Path(root_str))
+    log.info(
+        "已加载 Prompt 包 version=%s format=%s scenes=%s",
+        meta.prompt_version,
+        meta.prompt_pack_format,
+        ",".join(sorted(meta.scenes.keys())),
+    )
+    return meta
 
-    Args:
-        root_str: prompt 根目录的字符串形式。
-        mtime_ns: manifest 文件的 ``st_mtime_ns``，修改 manifest 后缓存失效。
 
-    Returns:
-        场景名 -> 片段相对路径列表。例如 ``{"default": ["core/base.md", ...]}``。
-
-    Raises:
-        ValueError: YAML 中缺少 ``scenes`` 字段。
-
-    Example:
-        若 ``manifest.yaml`` 含 ``scenes.default: [core/base.md, ...]``，
-        则返回值 ``["default"]`` 对应键下为路径字符串列表。
-    """
-    path = _manifest_path(Path(root_str))
-    with path.open(encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    scenes = data.get("scenes") if isinstance(data, dict) else None
-    if not scenes:
-        raise ValueError(f"manifest 缺少 scenes: {path}")
-    return {str(k): list(v) for k, v in scenes.items()}
+def _cached_manifest_scenes(root_str: str, mtime_ns: int) -> dict[str, list[str]]:
+    """返回场景 -> 片段路径列表（兼容内部组装逻辑）。"""
+    return _cached_manifest_pack(root_str, mtime_ns).scenes
 
 
 @lru_cache(maxsize=64)
@@ -140,7 +136,7 @@ def _cached_compose(
             )
     """
     root = Path(root_str)
-    manifest = _cached_manifest(root_str, manifest_mtime_ns)
+    manifest = _cached_manifest_scenes(root_str, manifest_mtime_ns)
     if scene_value not in manifest:
         raise KeyError(f"manifest 未定义场景: {scene_value}")
 
@@ -192,6 +188,12 @@ class SystemPromptComposer:
             'prompt'
         """
         self.root = root or PROMPT_DIR
+        # 启动时校验契约，避免运行中才暴露 format 不兼容
+        validate_pack_format(load_prompt_pack_meta(self.root))
+
+    def get_pack_meta(self) -> PromptPackMeta:
+        """当前 Prompt 包版本元数据（供 API / 日志）。"""
+        return _cached_manifest_pack(str(self.root), self._manifest_mtime_ns())
 
     def _manifest_mtime_ns(self) -> int:
         """读取 manifest 的纳秒级修改时间，供缓存键使用。
@@ -247,7 +249,7 @@ class SystemPromptComposer:
             >>> SystemPromptComposer().list_scenes()
             ['default', 'rag_qa', 'customer_support']
         """
-        return list(_cached_manifest(str(self.root), self._manifest_mtime_ns()).keys())
+        return list(self.get_pack_meta().scenes.keys())
 
 
 _default_composer = SystemPromptComposer()
@@ -274,6 +276,11 @@ def compose_system_prompt(
         True
     """
     return _default_composer.compose(scene, knobs)
+
+
+def get_prompt_pack_meta() -> PromptPackMeta:
+    """返回当前 Prompt 资产包版本信息。"""
+    return _default_composer.get_pack_meta()
 
 
 # 导入时预组装默认场景，避免每次请求重复 IO（供 runnable 模块级引用）
