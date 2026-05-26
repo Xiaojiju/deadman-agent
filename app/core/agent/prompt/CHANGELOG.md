@@ -9,7 +9,7 @@
 ## 版本与 Git Tag 建议
 
 | prompt_version | Git tag（可选） | 说明 |
-|----------------|-----------------|------|
+| ---------------- | ----------------- | ------ |
 | 1.1.0 | `prompt-v1.1.0` | Few-shot 4 组；格式下沉到样例 |
 | 1.0.0 | `prompt-v1.0.0` | 模块化 Core + Module + manifest |
 
@@ -42,8 +42,6 @@ git checkout prompt-v1.0.0 -- app/core/agent/prompt/
 ---
 
 ## [1.0.0] - 2026-05-20
-
-### Added
 
 - 模块化目录：`core/`、`modules/`、`manifest.yaml`
 - `composer` 组装 Policy；`Scene` 场景枚举
