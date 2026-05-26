@@ -65,7 +65,7 @@ class ToolAgentModelError(Exception):
 
 
 class AgentMode(str, Enum):
-    """本次请求实际使用的消费路径。"""
+    """本次请求实际使用的消费路径。 """
 
     TOOL_AGENT = "tool_agent"
     CHAT_FALLBACK = "chat_fallback"
@@ -83,7 +83,15 @@ class DegradationReason(str, Enum):
 
 @dataclass
 class ToolTraceItem:
-    """单次工具调用记录（供 API / 审计）。"""
+    """单次工具调用记录（供 API / 审计）。
+
+    Attributes:
+        tool: 工具名称。
+        args: 工具参数。
+        result: 工具结果。
+        ok: 是否成功。
+        error: 错误信息。
+    """
 
     tool: str
     args: dict[str, Any]
@@ -94,7 +102,16 @@ class ToolTraceItem:
 
 @dataclass
 class ToolAgentResult:
-    """Tool Agent 单次 invoke 结果。"""
+    """Tool Agent 单次 invoke 结果。
+
+    Attributes:
+        final_message: 最终消息。
+        tool_trace: 工具调用轨迹。
+        mode: 模式。
+        degraded: 是否降级。
+        degradation_reason: 降级原因。
+        retryable: 是否重试。
+    """
 
     final_message: AIMessage
     tool_trace: list[ToolTraceItem] = field(default_factory=list)
@@ -105,6 +122,15 @@ class ToolAgentResult:
 
 
 def _tool_error_payload(tool_name: str, error: str) -> dict[str, object]:
+    """工具错误 payload。
+
+    Args:
+        tool_name: 工具名称。
+        error: 错误信息。
+
+    Returns:
+        payload: 工具错误 payload。
+    """
     return {"ok": False, "tool": tool_name, "error": error}
 
 
@@ -114,7 +140,22 @@ def _execute_tool(
     tool_args: dict[str, Any],
     tool_call_id: str,
 ) -> tuple[ToolMessage, ToolTraceItem]:
-    """执行单个 tool_call；失败时返回错误 ToolMessage，不抛异常。"""
+    """执行单个 tool_call；失败时返回错误 ToolMessage，不抛异常。
+    
+    Args:
+        tools_by_name: 工具名称到工具实例的映射。
+        tool_name: 工具名称。
+        tool_args: 工具参数。
+        tool_call_id: 工具调用 ID。
+
+    Returns:
+
+        tool_msg: 工具消息。
+        trace: 工具调用轨迹。
+        
+    Raises:
+        Exception: 工具执行失败时抛出。
+    """
     tool = tools_by_name.get(tool_name)
     if tool is None:
         err = f"未知工具: {tool_name}"
@@ -170,7 +211,15 @@ def _parse_tool_call(
     round_idx: int,
     call_idx: int,
 ) -> tuple[str, dict[str, Any], str]:
-    """从 LangChain tool_call（dict 或对象）解析 name / args / id。"""
+    """从 LangChain tool_call（dict 或对象）解析 name / args / id。
+    
+    Args:
+        call: LangChain tool_call。
+        round_idx: 工具轮次索引。
+        call_idx: 工具调用索引。
+    Returns:
+        name: 工具名称。
+    """
     if isinstance(call, dict):
         name = str(call.get("name") or "")
         args = call.get("args") or {}
@@ -187,6 +236,7 @@ def _parse_tool_call(
 
 
 def _ai_text_content(message: AIMessage) -> str:
+    """将 AIMessage 转换为文本内容。"""
     content = message.content
     if isinstance(content, str):
         return content.strip()
@@ -202,6 +252,7 @@ def _ai_text_content(message: AIMessage) -> str:
 
 
 def _max_iterations_fallback_text(tool_trace: list[ToolTraceItem]) -> str:
+    """工具轮次用尽时的模板文案。"""
     if not tool_trace:
         return (
             "抱歉，设备操作步骤较多，未能在一轮内全部完成。"
@@ -215,10 +266,12 @@ def _max_iterations_fallback_text(tool_trace: list[ToolTraceItem]) -> str:
 
 
 def _plain_chat_unavailable_text() -> str:
+    """普通对话不可用时的模板文案。"""
     return "服务暂时不可用，请稍后再试。"
 
 
 def _to_ai_message(raw: Any) -> AIMessage:
+    """将模型响应转换为 AIMessage。"""
     if isinstance(raw, AIMessage):
         return raw
     if isinstance(raw, BaseMessage):
@@ -252,6 +305,16 @@ class ToolAgentRunner:
         default_knobs: PromptKnobs | None = None,
         max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
     ) -> None:
+        """初始化 Tool Agent Runner。
+        
+        Args:
+            model: 模型实例。
+            chat_fallback: 普通对话降级路径的 RunnableWithHistory 实例。
+            tools: 工具列表。
+            default_scene: 默认场景。
+            default_knobs: 默认 knobs，默认为空。
+            max_tool_rounds: 最大工具轮次，默认为 5。
+        """
         self.model = model
         self.chat_fallback = chat_fallback
         self.tools = list(tools or get_smart_home_tools())
@@ -271,6 +334,7 @@ class ToolAgentRunner:
         knobs: PromptKnobs,
         context: str | None,
     ) -> list[BaseMessage]:
+        """构建消息列表。"""
         history: BaseChatMessageHistory = self._get_session_history(session_id)
         policy = compose_system_prompt(scene, knobs)
         ctx_body = (context or "").strip() or EMPTY_CONTEXT_PLACEHOLDER
@@ -283,6 +347,7 @@ class ToolAgentRunner:
         ]
 
     def _persist_turn(self, session_id: str, new_messages: Sequence[BaseMessage]) -> None:
+        """持久化消息到历史记录。"""
         if not new_messages:
             return
         history = self._get_session_history(session_id)
@@ -360,6 +425,7 @@ class ToolAgentRunner:
         tool_trace: list[ToolTraceItem] | None = None,
         retryable: bool = False,
     ) -> ToolAgentResult:
+        """Tool Agent 降级为普通对话。"""
         log.warning(
             "Tool Agent 降级为普通对话 session=%s reason=%s partial_msgs=%s",
             session_id,
