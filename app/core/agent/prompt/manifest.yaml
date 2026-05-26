@@ -23,6 +23,11 @@ scenes:
     - core/safety.md
     - modules/customer_support.md
 
+  smart_home:
+    - core/base.md
+    - core/safety.md
+    - modules/smart_home.md
+
   # A/B 实验：复制 default 片段路径，改文件名或模块后再把流量切到 default_exp
   # default_exp:
   #   - core/base.md

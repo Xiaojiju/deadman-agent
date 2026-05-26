@@ -108,3 +108,9 @@ GET /chat/prompt/meta
 - 新增 API 字段（如新的 prompt 选择参数）。
 
 见 `prompt_version.py`、`CHANGELOG.md`、`doc/prompt-eval-set.md`。
+
+## Tool Agent 与降级（代码不在本目录）
+
+智能家居等**工具调用**场景使用 `app/core/agent/tool_agent.py`，与 `/chat` 的 `RunnableWithHistory` 并列；共用 `compose_system_prompt` 与 session 历史，但消息拼装与降级逻辑不同。
+
+详见 **[`../ARCHITECTURE.md`](../ARCHITECTURE.md)**（两条消费线、降级原因、`partial_turn` 与历史写入）。

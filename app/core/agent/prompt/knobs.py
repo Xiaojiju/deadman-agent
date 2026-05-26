@@ -37,6 +37,7 @@ class Scene(str, Enum):
     DEFAULT = "default"
     RAG_QA = "rag_qa"
     CUSTOMER_SUPPORT = "customer_support"
+    SMART_HOME = "smart_home"
 
 
 class Tone(str, Enum):

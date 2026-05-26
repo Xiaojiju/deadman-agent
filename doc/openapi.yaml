@@ -7,7 +7,10 @@ info:
   description: 'Deadman Agent HTTP API。
 
 
-    聊天接口使用模块化 system prompt：**Core + Module（scene）+ Knobs（语言/语气/受众）+ Context（RAG 参考材料）**。详见仓库 ``app/core/agent/prompt/ARCHITECTURE.md``。'
+    聊天接口使用模块化 system prompt：**Core + Module（scene）+ Knobs（语言/语气/受众）+ Context（RAG 参考材料）**。详见 ``app/core/agent/prompt/ARCHITECTURE.md``。
+
+
+    Tool Agent（``POST /chat/agent``）见 ``app/core/agent/ARCHITECTURE.md``。'
 paths:
   /health:
     get:
@@ -264,6 +267,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /chat/agent:
+    post:
+      tags:
+      - chat-agent
+      summary: Chat Agent
+      description: 'Tool Agent：**bind_tools** 驱动设备操作（如 ``control_light``），参数由工具 Pydantic schema 约束，不在
+        prompt 里写 JSON。
+
+
+        与 ``POST /chat`` 共用 ``session_id`` 历史存储；消息拼装与降级见 ``app/core/agent/ARCHITECTURE.md``。
+
+
+        **降级**：``enable_tools=false``、bind 失败、模型循环失败或达到工具轮次上限时 ``degraded=true``、``mode=chat_fallback``。半途失败会保留
+        ``partial_turn`` 写入历史后再做无工具总结。
+
+
+        响应：``tool_trace``、``degradation_reason``、``retryable``。'
+      operationId: chat_agent_chat_agent_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentChatRequest'
+            examples:
+              smart_home:
+                summary: 智能家居关灯
+                value:
+                  session_id: sess-agent-1
+                  user_input: 帮我把客厅灯关了
+                  scene: smart_home
+                  output_language: 简体中文
+                  tone: 正式
+              tools_off:
+                summary: 禁用工具（plain chat 降级）
+                value:
+                  session_id: sess-agent-2
+                  user_input: 你好
+                  scene: smart_home
+                  enable_tools: false
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse_AgentChatReplyData_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /chat/sessions:
     get:
       tags:
@@ -371,6 +427,156 @@ paths:
                 $ref: '#/components/schemas/ApiResponse_PromptPackMetaData_'
 components:
   schemas:
+    AgentChatReplyData:
+      properties:
+        role:
+          type: string
+          title: Role
+          description: 消息角色
+          default: assistant
+        content:
+          type: string
+          title: Content
+          description: 面向用户的最终回复
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+          description: 模型名称
+        finish_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Finish Reason
+          description: 结束原因
+        scene:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Scene
+          description: prompt 场景
+        output_language:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Output Language
+        tone:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tone
+        mode:
+          $ref: '#/components/schemas/AgentMode'
+          description: 实际消费路径：tool_agent 或 chat_fallback
+        degraded:
+          type: boolean
+          title: Degraded
+          description: 是否发生降级
+        degradation_reason:
+          $ref: '#/components/schemas/DegradationReason'
+          description: 降级原因
+        retryable:
+          type: boolean
+          title: Retryable
+          description: 是否建议在业务层重试（如限流、超时、网关错误）
+          default: false
+        tool_trace:
+          items:
+            $ref: '#/components/schemas/ToolTraceRecord'
+          type: array
+          title: Tool Trace
+          description: 工具调用轨迹
+      type: object
+      required:
+      - content
+      - mode
+      - degraded
+      - degradation_reason
+      title: AgentChatReplyData
+      description: Tool Agent 回复（含降级与工具轨迹）。
+    AgentChatRequest:
+      properties:
+        session_id:
+          type: string
+          minLength: 1
+          title: Session Id
+          description: 会话 ID
+        user_input:
+          type: string
+          minLength: 1
+          title: User Input
+          description: 用户输入
+        scene:
+          $ref: '#/components/schemas/Scene'
+          description: prompt 场景，工具 Agent 默认 smart_home
+          default: smart_home
+        output_language:
+          type: string
+          enum:
+          - 简体中文
+          - English
+          title: Output Language
+          description: 输出语言
+          default: 简体中文
+        tone:
+          $ref: '#/components/schemas/Tone'
+          description: 回复语气
+          default: 正式
+        audience:
+          type: string
+          maxLength: 32
+          title: Audience
+          description: 目标受众
+          default: 普通用户
+        context:
+          anyOf:
+          - type: string
+            maxLength: 32000
+          - type: 'null'
+          title: Context
+          description: 可选参考材料（第二条 system）
+        enable_tools:
+          type: boolean
+          title: Enable Tools
+          description: 是否启用工具；False 时直接走普通对话降级路径
+          default: true
+      type: object
+      required:
+      - session_id
+      - user_input
+      title: AgentChatRequest
+      description: Tool Agent 聊天请求（默认 ``smart_home`` 场景）。
+    AgentMode:
+      type: string
+      enum:
+      - tool_agent
+      - chat_fallback
+      title: AgentMode
+      description: 本次请求实际使用的消费路径。
+    ApiResponse_AgentChatReplyData_:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: The code of the response.
+          default: 0
+        message:
+          type: string
+          title: Message
+          description: The message of the response.
+          default: Success
+        timestamp:
+          type: integer
+          title: Timestamp
+          description: The timestamp of the response.
+        data:
+          anyOf:
+          - $ref: '#/components/schemas/AgentChatReplyData'
+          - type: 'null'
+          description: The data of the response.
+      type: object
+      title: ApiResponse[AgentChatReplyData]
     ApiResponse_ChatMessagesPageData_:
       properties:
         code:
@@ -671,6 +877,16 @@ components:
       - pagination
       title: ChatSessionsPageData
       description: 会话列表分页数据。
+    DegradationReason:
+      type: string
+      enum:
+      - none
+      - tools_disabled
+      - bind_tools_failed
+      - model_invoke_failed
+      - max_iterations
+      title: DegradationReason
+      description: 降级原因（``degraded=False`` 时为 ``none``）。
     HTTPValidationError:
       properties:
         detail:
@@ -775,6 +991,7 @@ components:
       - default
       - rag_qa
       - customer_support
+      - smart_home
       title: Scene
       description: '业务场景，对应 ``manifest.yaml`` 中的 ``scenes`` 键。
 
@@ -792,6 +1009,37 @@ components:
 
 
         限制为枚举值，避免将用户任意输入直接拼进 system，降低 prompt 注入风险。'
+    ToolTraceRecord:
+      properties:
+        tool:
+          type: string
+          title: Tool
+        args:
+          additionalProperties: true
+          type: object
+          title: Args
+        result:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: string
+          title: Result
+        ok:
+          type: boolean
+          title: Ok
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+      type: object
+      required:
+      - tool
+      - args
+      - result
+      - ok
+      title: ToolTraceRecord
+      description: API 暴露的工具调用轨迹。
     ValidationError:
       properties:
         loc:
@@ -855,6 +1103,8 @@ tags:
   description: 健康检查
 - name: chat
   description: 多轮对话（模块化 prompt + 可选流式 SSE）
+- name: chat-agent
+  description: Tool Agent（工具调用 + 降级，非流式）
 - name: chat-history
   description: 聊天历史查询（分页）
 - name: prompt

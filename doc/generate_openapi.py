@@ -70,7 +70,8 @@ def build_spec() -> dict:
     spec["info"]["description"] = (
         "Deadman Agent HTTP API。\n\n"
         "聊天接口使用模块化 system prompt：**Core + Module（scene）+ Knobs（语言/语气/受众）"
-        "+ Context（RAG 参考材料）**。详见仓库 ``app/core/agent/prompt/ARCHITECTURE.md``。"
+        "+ Context（RAG 参考材料）**。详见 ``app/core/agent/prompt/ARCHITECTURE.md``。\n\n"
+        "Tool Agent（``POST /chat/agent``）见 ``app/core/agent/ARCHITECTURE.md``。"
     )
 
     if "tags" not in spec:
@@ -79,6 +80,7 @@ def build_spec() -> dict:
     for name, desc in (
         ("health", "健康检查"),
         ("chat", "多轮对话（模块化 prompt + 可选流式 SSE）"),
+        ("chat-agent", "Tool Agent（工具调用 + 降级，非流式）"),
         ("chat-history", "聊天历史查询（分页）"),
         ("prompt", "Prompt 资产包版本与契约"),
     ):
@@ -174,6 +176,43 @@ def build_spec() -> dict:
             "200": _sse_response("同 GET /chat/stream"),
             "422": stream["post"].get("responses", {}).get("422", {"description": "Validation Error"}),
         }
+
+    _agent_examples = {
+        "smart_home": {
+            "summary": "智能家居关灯",
+            "value": {
+                "session_id": "sess-agent-1",
+                "user_input": "帮我把客厅灯关了",
+                "scene": "smart_home",
+                "output_language": "简体中文",
+                "tone": "正式",
+            },
+        },
+        "tools_off": {
+            "summary": "禁用工具（plain chat 降级）",
+            "value": {
+                "session_id": "sess-agent-2",
+                "user_input": "你好",
+                "scene": "smart_home",
+                "enable_tools": False,
+            },
+        },
+    }
+
+    if "/chat/agent" in paths and "post" in paths["/chat/agent"]:
+        agent_post = paths["/chat/agent"]["post"]
+        agent_post["description"] = (
+            "Tool Agent：**bind_tools** 驱动设备操作（如 ``control_light``），"
+            "参数由工具 Pydantic schema 约束，不在 prompt 里写 JSON。\n\n"
+            "与 ``POST /chat`` 共用 ``session_id`` 历史存储；消息拼装与降级见 "
+            "``app/core/agent/ARCHITECTURE.md``。\n\n"
+            "**降级**：``enable_tools=false``、bind 失败、模型循环失败或达到工具轮次上限时 "
+            "``degraded=true``、``mode=chat_fallback``。半途失败会保留 ``partial_turn`` "
+            "写入历史后再做无工具总结。\n\n"
+            "响应：``tool_trace``、``degradation_reason``、``retryable``。"
+        )
+        agent_body = agent_post.setdefault("requestBody", {}).setdefault("content", {})
+        agent_body.setdefault("application/json", {})["examples"] = _agent_examples
 
     # 手写 SSE 事件 schema（FastAPI 流式响应无结构化 body）
     components = spec.setdefault("components", {}).setdefault("schemas", {})
